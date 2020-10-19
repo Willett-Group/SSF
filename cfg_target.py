@@ -2,7 +2,7 @@ import numpy as np
 
 ################### Configuration for Data Loading ################################
 path = 'data/'  # need to change to the absolute path of the data files
-path_save = '/scratch/grosenthal/'  # need to change to the absolute path to save data_files
+computedpath = '/scratch/grosenthal/'  # need to change to the absolute path to save data_files
 absolute_path = '/home-nfs/grosenthal/willett_climate/SSF/'  # need to change to the absolute path of the code files
 rootpath_cv = absolute_path + 'data/random_cv/'
 forecast_rootpath = absolute_path + 'data/forecast/'
