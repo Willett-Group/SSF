@@ -23,7 +23,7 @@ def main():
 
     time_index = pd.date_range(train_start_date, end_date, freq='1D')
 
-    existing_dates = [str(t[2]).split(" ")[0] for t in target.index.unique]
+    existing_dates = [str(t[2]).split(" ")[0] for t in target.index]
     unique_dates = list(set(existing_dates))
     
     target = target.loc[idx[:, :, unique_dates], :]
