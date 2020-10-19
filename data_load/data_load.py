@@ -43,6 +43,8 @@ def data_augmentation_one_years(train_date, covariate_set, spatial_range, path):
         for cov in covariate_set[1:]:
             file_name = path + cov + '.' + str(train_date[0].year) + '.h5'
             cov_temp = pd.read_hdf(file_name)
+            if isinstance(cov_temp, pd.Series) and cov_temp.name == None:
+                cov_temp.name = cov + '.' + str(train_date[0].year)
             # cov_temp = cov_file.to_frame()
             df = df.merge(cov_temp, on=['lat', 'lon', 'start_date'])
             df = df.rename(columns={df.columns[-1]: cov})
@@ -177,7 +179,7 @@ class DataLoader(object):
         '''
         if resolution == 2:
             # subsample the map with the resolution as 2x2 for target variables
-            spatial_map = pd.read_hdf(path + 'target_map_2.h5')
+            spatial_map = pd.read_hdf(path + 'us_mask.h5')
             return spatial_map
         else:
             print('the spatial map for resolution as {} is not available'.format(resolution))
@@ -387,6 +389,8 @@ class DataLoader(object):
         date_index = pd.date_range(start=start_date, end=end_date)
         date_index = pd.DataFrame(date_index, columns=['start_date'])
         data_temp = data.reset_index()
+        if not ('start_date' in data_temp.columns):
+            data_temp = data_temp.rename(columns={'index':'start_date'})
         data_subset = date_index.merge(data_temp, on=['start_date'])
         return data_subset
 
