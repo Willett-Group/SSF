@@ -28,7 +28,26 @@ from joblib import Parallel, delayed
 import argparse
 import torch
 import torch.nn as nn
+from time import perf_counter 
+import GPUtil
 
+from threading import Thread
+import time
+
+class Monitor(Thread):
+    def __init__(self, delay):
+        super(Monitor, self).__init__()
+        self.stopped = False
+        self.delay = delay # Time between calls to GPUtil
+        self.start()
+
+    def run(self):
+        while not self.stopped:
+            GPUtil.showUtilization()
+            time.sleep(self.delay)
+
+    def stop(self):
+        self.stopped = True
 
 def compute_cosine(a, b):
     """Compute cosine similarity between two vectors
@@ -53,6 +72,8 @@ def random_cv(cv_index, cv_year, roothpath, param_grid, num_random, model_name, 
     one_day: True or False, indicating if only the most recent available day is used for training a model (XGBoost or Lasso)
     """
     # load data
+    rootpath = '/scratch/grosenthal/'
+    monitor = Monitor(10)
     if model_name in ['CNN_LSTM', 'CNN_FNN']:
         train_X = load_results(rootpath + 'train_X_map_{}_forecast{}.pkl'.format(cv_year, cv_index))
         valid_X = load_results(rootpath + 'val_X_map_{}_forecast{}.pkl'.format(cv_year, cv_index))
@@ -103,7 +124,7 @@ def random_cv(cv_index, cv_year, roothpath, param_grid, num_random, model_name, 
             linear_dim = param_grid['linear_dim']
             drop_out = param_grid['drop_out']
     elif model_name == 'XGBoost':
-        if one_day = True:
+        if one_day is True:
             train_X = train_X[:, -1, :]  # one day
             valid_X = valid_X[:, -1, :]  # one day
         train_X = np.reshape(train_X, (train_X.shape[0], -1))
@@ -114,31 +135,32 @@ def random_cv(cv_index, cv_year, roothpath, param_grid, num_random, model_name, 
         n_estimators = param_grid['n_estimators']
         lr = param_grid['learning_rate']
     elif model_name == 'Lasso':
-        if one_day = True:
+        if one_day is True:
             train_X = train_X[:, -1, :]  # one day
             valid_X = valid_X[:, -1, :]  # one day
         train_X = np.reshape(train_X, (train_X.shape[0], -1))
         valid_X = np.reshape(valid_X, (valid_X.shape[0], -1))
         alphas = param_grid['alpha']
     elif model_name == 'FNN':
-        # train_X = train_X[:,-1,:] # one day
-        # valid_X = valid_X[:,-1,:] # one day
+        if one_day is True:
+            train_X = train_X[:, -1, :]  # one day
+            valid_X = valid_X[:, -1, :]  # one day
         train_X = np.reshape(train_X, (train_X.shape[0], -1))
         valid_X = np.reshape(valid_X, (valid_X.shape[0], -1))
         train_dataset = model.MapDataset(train_X, train_y)
-        train_loader = DataLoader(dataset=train_dataset, batch_size=512, shuffle=False)
+        train_loader = DataLoader(dataset=train_dataset, batch_size=64, shuffle=False)
         hidden_dim = param_grid['hidden_dim']
         num_layers = param_grid['num_layers']
     elif model_name == 'CNN_FNN':
         train_dataset = model.MapDataset_CNN(train_X, train_y)
-        train_loader = DataLoader(dataset=train_dataset, batch_size=50, shuffle=False)
+        train_loader = DataLoader(dataset=train_dataset, batch_size=16, shuffle=False)
         stride = param_grid['stride']
         kernel_size = param_grid['kernel_size']
         hidden_dim = param_grid['hidden_dim']
         num_layers = param_grid['num_layers']
     elif model_name == 'CNN_LSTM':
         train_dataset = model.MapDataset_CNN(train_X, train_y)
-        train_loader = DataLoader(dataset=train_dataset, batch_size=50, shuffle=False)
+        train_loader = DataLoader(dataset=train_dataset, batch_size=16, shuffle=False)
         stride = param_grid['module__stride']
         kernel_size = param_grid['module__kernel_size']
         hidden_dim = param_grid['module__hidden_dim']
@@ -151,7 +173,8 @@ def random_cv(cv_index, cv_year, roothpath, param_grid, num_random, model_name, 
     history_all = []
     score = []
     parameter_all = []
-    for i in range(num_random):
+    training_counts = {'XGBoost':0, 'Lasso':0}
+    for i in range(5):
         # set model
         if model_name == 'EncoderDecoder':
             curr_hidden_dim = hidden_dim[randint(0, len(hidden_dim) - 1)]
@@ -281,9 +304,14 @@ def random_cv(cv_index, cv_year, roothpath, param_grid, num_random, model_name, 
                                      gamma=curr_gamma, learning_rate=curr_lr, max_depth=curr_max_depth,
                                      n_estimators=curr_n_estimators, objective='reg:squarederror')
             # history = mdl.fit_cv(train_X, train_y, valid_X, valid_y)
+            print("Starting fitting XGBoost run #", training_counts['XGBoost'], "for month ", cv_index)
             mdl.fit(train_X, train_y)
+            training_counts['XGBoost'] += 1
+            t1_start = perf_counter()
             pred_y = mdl.predict(valid_X)
             history = None
+            t1_stop = perf_counter()
+            print("Elapsed time for training XGBoost, run # ", training_counts['XGBoost'], "for month ", cv_index, "in seconds:",  t1_stop-t1_start) 
         elif model_name == 'Lasso':
             curr_alpha = alphas[randint(0, len(alphas) - 1)]
             parameter = {'alpha': curr_alpha}
@@ -344,10 +372,11 @@ def random_cv(cv_index, cv_year, roothpath, param_grid, num_random, model_name, 
         test_rmse = np.sqrt(((valid_y - pred_y)**2).mean())
         test_cos = np.asarray([compute_cosine(valid_y[i, :], pred_y[i, :]) for i in range(len(valid_y))]).mean()
         score.append([test_rmse, test_cos])
+        monitor.stop()
 
     cv_results = {'score': score, 'parameter_all': parameter_all, 'history_all': history_all}
     save_results(rootpath + 'cv_results_test/cv_results_' + model_name + '_{}_{}.pkl'.format(cv_year, cv_index), cv_results)
-
+    
 
 # set device for running the code
 
@@ -387,4 +416,4 @@ else:
     print('can not find the model')
 
 #
-Parallel(n_jobs=12)(delayed(random_cv)(cv_index, cv_year=year, roothpath=rootpath, param_grid=param_grid, num_random=num_random, model_name=model_name, device=device, one_day=one_day) for cv_index in month_range)
+Parallel(n_jobs=4)(delayed(random_cv)(cv_index, cv_year=year, roothpath=rootpath, param_grid=param_grid, num_random=num_random, model_name=model_name, device=device, one_day=one_day) for cv_index in range(1,13))
